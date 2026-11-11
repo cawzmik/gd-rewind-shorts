@@ -14,6 +14,7 @@ This repo runs the app on a timer. Every 10 minutes it looks for new posts with 
 
 - **Pause it:** Actions, Shorts, the three dots, Disable workflow.
 - **Test a video without posting:** Actions, Shorts, Run workflow, type a post id (the number at the end of the post's link). The video shows up under Artifacts on that run.
+- **Check the key still works:** same as the test, but type `accounts` instead of a post id.
 - **Update the app:** replace `app/GD Rewind Shorts.exe` and push.
 
 Posting goes through Zernio. The key is stored as the `ZERNIO_KEY` secret.

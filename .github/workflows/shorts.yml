@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       test:
-        description: Post id to make as a test video. Nothing is posted.
+        description: Post id to make as a test video, or the word accounts to check the key. Nothing is posted.
         required: false
 
 # One round at a time, so two rounds can never post the same video
@@ -64,6 +64,10 @@ jobs:
           $app = 'app\GD Rewind Shorts.exe'
           $work = "$env:LOCALAPPDATA\GD Rewind Shorts"
           New-Item -ItemType Directory -Force $work, out | Out-Null
+          if ($env:TEST_ID -eq 'accounts') {
+            & $app --accounts | Out-Host
+            exit $LASTEXITCODE
+          }
           if ($env:TEST_ID) {
             & $app --render $env:TEST_ID "$PWD\out" | Out-Host
             exit $LASTEXITCODE

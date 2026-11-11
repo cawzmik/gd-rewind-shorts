@@ -1,0 +1,115 @@
+name: Shorts
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      test:
+        description: Post id to make as a test video. Nothing is posted.
+        required: false
+
+# One round at a time, so two rounds can never post the same video
+concurrency:
+  group: shorts
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  shorts:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      TEST_ID: ${{ inputs.test }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Look for new posts
+        id: check
+        shell: pwsh
+        run: |
+          if ($env:TEST_ID) { "new=1" >> $env:GITHUB_OUTPUT; exit 0 }
+          # The feed answers 404 now and then, so it is asked a few times
+          $feed = $null
+          foreach ($try in 1..4) {
+            try { $feed = (Invoke-WebRequest -UseBasicParsing -UserAgent 'gd-rewind-shorts/1.0' 'https://fxtwitter.com/GDRewind/feed.xml').Content; break }
+            catch { Start-Sleep 3 }
+          }
+          if (-not $feed) { 'The feed did not answer. Trying again next round.'; "new=0" >> $env:GITHUB_OUTPUT; exit 0 }
+          $ids = [regex]::Matches($feed, '<link>https://[a-z.]+/GDRewind/status/(\d+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+          $seen = if (Test-Path seen.txt) { Get-Content seen.txt } else { @() }
+          $new = @($ids | Where-Object { $_ -notin $seen })
+          "$($new.Count) new post(s): $($new -join ', ')"
+          "new=$($new.Count)" >> $env:GITHUB_OUTPUT
+
+      - name: Get ffmpeg
+        if: steps.check.outputs.new != '0'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg -y --no-progress
+            if ($LASTEXITCODE -ne 0) { choco install ffmpeg -y --no-progress }
+          }
+          ffmpeg -version | Select-Object -First 1
+
+      - name: Make and post
+        id: run
+        if: steps.check.outputs.new != '0'
+        shell: pwsh
+        env:
+          ZERNIO_KEY: ${{ secrets.ZERNIO_KEY }}
+        run: |
+          $app = 'app\GD Rewind Shorts.exe'
+          $work = "$env:LOCALAPPDATA\GD Rewind Shorts"
+          New-Item -ItemType Directory -Force $work, out | Out-Null
+          if ($env:TEST_ID) {
+            & $app --render $env:TEST_ID "$PWD\out" | Out-Host
+            exit $LASTEXITCODE
+          }
+          # With no seen.txt yet, the first round only takes note of the posts that are already there
+          if (Test-Path seen.txt) {
+            if (-not $env:ZERNIO_KEY) { throw 'The ZERNIO_KEY secret is missing, so nothing can be posted. Add it under Settings, Secrets and variables, Actions.' }
+            Copy-Item seen.txt $work
+          }
+          & $app --auto | Out-Host
+          "code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
+          if (Test-Path "$work\seen.txt") { Copy-Item "$work\seen.txt" seen.txt -Force }
+          Copy-Item "$([Environment]::GetFolderPath('MyVideos'))\GD Rewind Shorts\*.mp4" out -ErrorAction SilentlyContinue
+          exit 0
+
+      # Saved before anything else can go wrong: a post that is written down is never posted twice
+      - name: Remember what was done
+        if: steps.check.outputs.new != '0' && inputs.test == ''
+        shell: pwsh
+        run: |
+          git config user.name cawzmik
+          git config user.email 96568224+cawzmik@users.noreply.github.com
+          git add seen.txt
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          git commit -m "Update seen posts"
+          foreach ($try in 1..3) {
+            git pull --rebase
+            git push
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Start-Sleep 5
+          }
+          exit 1
+
+      - name: Keep the videos for 3 days
+        if: always() && steps.check.outputs.new != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: videos
+          path: out/*.mp4
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Report a problem
+        if: steps.run.outputs.code != '' && steps.run.outputs.code != '0'
+        shell: pwsh
+        run: |
+          Write-Host "::error::A video could not be made or posted. Open the 'Make and post' step to see which one."
+          exit 1

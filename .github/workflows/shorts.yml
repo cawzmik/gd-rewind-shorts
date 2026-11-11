@@ -48,15 +48,18 @@ jobs:
         if: steps.check.outputs.new != '0'
         shell: pwsh
         run: |
+          # Always the same ffmpeg, so a new release cannot change or break the videos overnight
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-            choco install ffmpeg -y --no-progress
-            if ($LASTEXITCODE -ne 0) { choco install ffmpeg -y --no-progress }
+            choco install ffmpeg -y --no-progress --version=9.0.2
+            if ($LASTEXITCODE -ne 0) { choco install ffmpeg -y --no-progress --version=9.0.2 }
           }
           ffmpeg -version | Select-Object -First 1
 
+      # Its own limit, shorter than the job's, so there is always time left to save the list
       - name: Make and post
         id: run
         if: steps.check.outputs.new != '0'
+        timeout-minutes: 15
         shell: pwsh
         env:
           ZERNIO_KEY: ${{ secrets.ZERNIO_KEY }}
@@ -77,17 +80,25 @@ jobs:
             if (-not $env:ZERNIO_KEY) { throw 'The ZERNIO_KEY secret is missing, so nothing can be posted. Add it under Settings, Secrets and variables, Actions.' }
             Copy-Item seen.txt $work
           }
-          & $app --auto | Out-Host
+          & $app --auto --start | Out-Host
           "code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
-          if (Test-Path "$work\seen.txt") { Copy-Item "$work\seen.txt" seen.txt -Force }
-          Copy-Item "$([Environment]::GetFolderPath('MyVideos'))\GD Rewind Shorts\*.mp4" out -ErrorAction SilentlyContinue
           exit 0
 
-      # Saved before anything else can go wrong: a post that is written down is never posted twice
+      # Saved before anything else can go wrong: a post that is written down is never posted twice.
+      # This runs even when the step above failed or was stopped half way, so the list is never lost.
       - name: Remember what was done
-        if: steps.check.outputs.new != '0' && inputs.test == ''
+        if: always() && steps.check.outputs.new != '0' && inputs.test == ''
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item "$([Environment]::GetFolderPath('MyVideos'))\GD Rewind Shorts\*.mp4" out -ErrorAction SilentlyContinue
+          $made = "$env:LOCALAPPDATA\GD Rewind Shorts\seen.txt"
+          if (-not (Test-Path $made)) { 'No list was written this round, so there is nothing to save.'; exit 0 }
+          # The two lists are joined, so a list that was cut off half way can never make a saved post vanish
+          $old = if (Test-Path seen.txt) { @(Get-Content seen.txt) } else { @() }
+          $all = @($old + @(Get-Content $made) | Where-Object { $_ -and $_.Trim() } | Select-Object -Unique)
+          if ($all.Count -eq 0) { 'The list is empty, so there is nothing to save.'; exit 0 }
+          Set-Content seen.txt $all
           git config user.name cawzmik
           git config user.email 96568224+cawzmik@users.noreply.github.com
           git add seen.txt

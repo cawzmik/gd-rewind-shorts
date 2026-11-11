@@ -107,8 +107,9 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
+      # Code 1 only means the feed did not answer: nothing was touched and the next round tries again
       - name: Report a problem
-        if: steps.run.outputs.code != '' && steps.run.outputs.code != '0'
+        if: steps.run.outputs.code == '2'
         shell: pwsh
         run: |
           Write-Host "::error::A video could not be made or posted. Open the 'Make and post' step to see which one."

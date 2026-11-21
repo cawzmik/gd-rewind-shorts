@@ -34,9 +34,9 @@ jobs:
           if ($env:TEST_ID) { "new=1" >> $env:GITHUB_OUTPUT; exit 0 }
           # The feed answers 404 now and then, so it is asked a few times
           $feed = $null
-          foreach ($try in 1..4) {
+          foreach ($try in 1..8) {
             try { $feed = (Invoke-WebRequest -UseBasicParsing -UserAgent 'gd-rewind-shorts/1.0' 'https://fxtwitter.com/GDRewind/feed.xml').Content; break }
-            catch { Start-Sleep 3 }
+            catch { Start-Sleep 20 }
           }
           if (-not $feed) { 'The feed did not answer. Trying again next round.'; "new=0" >> $env:GITHUB_OUTPUT; exit 0 }
           $ids = [regex]::Matches($feed, '<link>https://[a-z.]+/GDRewind/status/(\d+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
